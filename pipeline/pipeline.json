@@ -20,11 +20,13 @@
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/bronze/gmail_bronze.py"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/bronze/calendar_bronze.py"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/bronze/slack_bronze.py"}},
+    {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/bronze/gtasks_bronze.py"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_sf_accounts.sql"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_sf_use_cases.sql"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_gmail_emails.sql"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_calendar_events.sql"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_slack_messages.sql"}},
+    {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/silver/silver_gtasks.sql"}},
     {"notebook": {"path": "/Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/pipeline/src/gold/gold_sa_activity.sql"}}
   ]
 }
