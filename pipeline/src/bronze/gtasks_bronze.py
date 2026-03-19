@@ -37,16 +37,17 @@ ACCOUNT_KEYWORDS = {
 }
 
 _SCHEMA = StructType([
-    StructField("task_id",       StringType()),
-    StructField("tasklist_id",   StringType()),
-    StructField("tasklist_name", StringType()),
-    StructField("title",         StringType()),
-    StructField("notes",         StringType()),
-    StructField("status",        StringType()),
-    StructField("due_date",      StringType()),
-    StructField("account_name",  StringType()),
-    StructField("updated",       StringType()),
-    StructField("_extracted_at", TimestampType()),
+    StructField("task_id",        StringType()),
+    StructField("parent_task_id", StringType()),
+    StructField("tasklist_id",    StringType()),
+    StructField("tasklist_name",  StringType()),
+    StructField("title",          StringType()),
+    StructField("notes",          StringType()),
+    StructField("status",         StringType()),
+    StructField("due_date",       StringType()),
+    StructField("account_name",   StringType()),
+    StructField("updated",        StringType()),
+    StructField("_extracted_at",  TimestampType()),
 ])
 
 
@@ -103,9 +104,10 @@ def _fetch_tasks():
     for tl in task_lists.get("items", []):
         tl_id   = tl["id"]
         tl_name = tl.get("title", "My Tasks")
+        # showHidden=true ensures subtasks are returned alongside parent tasks
         tasks   = _get(
             f"https://tasks.googleapis.com/tasks/v1/lists/{tl_id}/tasks"
-            f"?showCompleted=false&maxResults=100"
+            f"?showCompleted=false&showHidden=true&maxResults=100"
         )
         for t in tasks.get("items", []):
             if t.get("status") == "completed":
@@ -115,6 +117,7 @@ def _fetch_tasks():
             account = _match_account(f"{title} {notes}")
             rows.append((
                 t["id"],
+                t.get("parent") or None,
                 tl_id,
                 tl_name,
                 title,
