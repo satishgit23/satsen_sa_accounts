@@ -1,8 +1,9 @@
 # Databricks notebook source
-# MAGIC %pip install slack-sdk
+# COMMAND ----------
+import subprocess, sys
+subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "slack-sdk"], check=True)
 
 # COMMAND ----------
-
 """
 Bronze Layer — Slack (Incremental Append)
 Fetches only the PREVIOUS DAY's customer-channel messages via Slack API and

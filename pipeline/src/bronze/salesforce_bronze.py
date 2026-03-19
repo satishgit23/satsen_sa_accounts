@@ -1,8 +1,9 @@
 # Databricks notebook source
-# MAGIC %pip install simple-salesforce
+# COMMAND ----------
+import subprocess, sys
+subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "simple-salesforce"], check=True)
 
 # COMMAND ----------
-
 """
 Bronze Layer — Salesforce
 Reads credentials from Databricks Secrets, calls Salesforce REST API,
@@ -60,20 +61,30 @@ def _get_secret(scope, key):
 def _sf_client():
     from simple_salesforce import Salesforce
 
-    # Prefer username+password+security_token (does not expire — ideal for scheduled jobs).
-    # Falls back to a pre-existing session_id/instance_url pair if user creds not stored.
+    # Try username+password+security_token first (auto-refreshes, ideal for scheduled jobs).
+    # Only fall back to session_id if the username secret is not set at all.
     try:
-        username  = _get_secret(SECRET_SCOPE, "sf_username")
-        password  = _get_secret(SECRET_SCOPE, "sf_password")
-        sec_token = _get_secret(SECRET_SCOPE, "sf_security_token")
-        if username and password:
-            return Salesforce(
-                username       = username,
-                password       = password,
-                security_token = sec_token or "",
-            )
+        username = _get_secret(SECRET_SCOPE, "sf_username")
     except Exception:
-        pass
+        username = None
+
+    if username:
+        # Credentials are configured — use them and let any auth error surface clearly.
+        password      = _get_secret(SECRET_SCOPE, "sf_password")
+        sec_token     = _get_secret(SECRET_SCOPE, "sf_security_token")
+        instance_url  = _get_secret(SECRET_SCOPE, "sf_instance_url")
+        # databricks.my.salesforce.com is a custom domain; extract "databricks.my" as the domain.
+        domain = None
+        if instance_url:
+            host = instance_url.replace("https://", "").replace("http://", "").rstrip("/")
+            if host.endswith(".salesforce.com"):
+                domain = host[: -len(".salesforce.com")]
+        return Salesforce(
+            username       = username,
+            password       = password,
+            security_token = sec_token or "",
+            domain         = domain or "login",
+        )
 
     # Legacy fallback: session_id expires — only used until new creds are stored.
     return Salesforce(
