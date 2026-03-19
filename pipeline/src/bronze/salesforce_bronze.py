@@ -59,6 +59,23 @@ def _get_secret(scope, key):
 
 def _sf_client():
     from simple_salesforce import Salesforce
+
+    # Prefer username+password+security_token (does not expire — ideal for scheduled jobs).
+    # Falls back to a pre-existing session_id/instance_url pair if user creds not stored.
+    try:
+        username  = _get_secret(SECRET_SCOPE, "sf_username")
+        password  = _get_secret(SECRET_SCOPE, "sf_password")
+        sec_token = _get_secret(SECRET_SCOPE, "sf_security_token")
+        if username and password:
+            return Salesforce(
+                username       = username,
+                password       = password,
+                security_token = sec_token or "",
+            )
+    except Exception:
+        pass
+
+    # Legacy fallback: session_id expires — only used until new creds are stored.
     return Salesforce(
         session_id   = _get_secret(SECRET_SCOPE, "sf_access_token"),
         instance_url = _get_secret(SECRET_SCOPE, "sf_instance_url"),
