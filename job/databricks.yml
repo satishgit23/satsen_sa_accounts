@@ -1,0 +1,58 @@
+bundle:
+  name: satsen_sa_accounts
+
+workspace:
+  host: https://e2-demo-field-eng.cloud.databricks.com
+
+variables:
+  catalog:
+    default: satsen_catalog
+  schema:
+    default: satsen_sa_accounts
+  sa_email:
+    default: satish.senapathy@databricks.com
+  secret_scope:
+    default: satsen-sa-tracker
+  pipeline_id:
+    default: 28b9d78f-1fc8-444b-89df-556670175352
+
+resources:
+  jobs:
+    sa_tracker_daily_ingest:
+      name: "SA Tracker — Daily Ingest (Trigger Pipeline)"
+      description: "Triggers the SATSEN Accounts Ingest Pipeline daily and runs SQL analysis."
+
+      # ── Daily at 7 AM CST ──────────────────────────────────────────────────
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      email_notifications:
+        on_failure:
+          - satish.senapathy@databricks.com
+
+      tasks:
+        - task_key: trigger_pipeline
+          description: "Trigger the SATSEN Accounts Ingest Lakeflow Pipeline"
+          pipeline_task:
+            pipeline_id: ${var.pipeline_id}
+            full_refresh: false
+
+        - task_key: daily_activity_report
+          description: "Run daily activity SQL notebook after pipeline completes"
+          depends_on:
+            - task_key: trigger_pipeline
+          notebook_task:
+            notebook_path: /Workspace/Users/satish.senapathy@databricks.com/satsen_sa_accounts/notebooks/05_daily_activity.sql
+            source: WORKSPACE
+          job_cluster_key: shared_cluster
+
+      job_clusters:
+        - job_cluster_key: shared_cluster
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: i3.xlarge
+            num_workers: 1
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
