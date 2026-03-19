@@ -86,10 +86,13 @@ def _refresh_access_token():
     return result.get("access_token"), result.get("instance_url", instance_url)
 
 
-def _sf_client():
+def _sf_client(access_token=None, instance_url=None):
     from simple_salesforce import Salesforce
 
-    # 1. Try refresh token first — auto-refreshes access token each run.
+    if access_token and instance_url:
+        return Salesforce(session_id=access_token, instance_url=instance_url)
+
+    # 1. Try refresh token first — get a fresh access token every time.
     try:
         tokens = _refresh_access_token()
         if tokens:
@@ -113,6 +116,33 @@ def _sf_client():
     return Salesforce(session_id=session_id, instance_url=instance_url)
 
 
+def _sf_query_all(query):
+    """Run a Salesforce query with automatic retry on session expiry."""
+    from simple_salesforce.exceptions import SalesforceExpiredSession
+
+    def _is_session_expired(ex):
+        if isinstance(ex, SalesforceExpiredSession):
+            return True
+        return "INVALID_SESSION_ID" in str(getattr(ex, "content", [])) or "Session expired" in str(ex)
+
+    sf = _sf_client()
+    try:
+        return sf.query_all(query).get("records", [])
+    except Exception as ex:
+        if not _is_session_expired(ex):
+            raise
+        # Session expired — refresh token and retry with a new session.
+        tokens = _refresh_access_token()
+        if not tokens:
+            raise RuntimeError(
+                "Session expired and no refresh token configured. "
+                "Run refresh_sf_token.py to store sf_refresh_token, sf_client_id, sf_client_secret."
+            )
+        access_token, instance_url = tokens
+        sf = _sf_client(access_token=access_token, instance_url=instance_url)
+        return sf.query_all(query).get("records", [])
+
+
 def _to_dt(val):
     if not val:
         return None
@@ -128,8 +158,7 @@ def _to_dt(val):
     comment = "Raw Salesforce accounts — Last SA Engaged = Satish Senapathy",
 )
 def raw_sf_accounts():
-    sf      = _sf_client()
-    records = sf.query_all(SF_ACCOUNTS_QUERY).get("records", [])
+    records = _sf_query_all(SF_ACCOUNTS_QUERY)
     now     = datetime.now(timezone.utc)
 
     rows = [
@@ -180,8 +209,7 @@ def raw_sf_accounts():
     comment = "Raw Salesforce UCOs for SA-managed accounts",
 )
 def raw_sf_use_cases():
-    sf      = _sf_client()
-    records = sf.query_all(SF_UCO_QUERY).get("records", [])
+    records = _sf_query_all(SF_UCO_QUERY)
     now     = datetime.now(timezone.utc)
 
     rows = [
