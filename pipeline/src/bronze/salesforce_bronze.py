@@ -61,36 +61,19 @@ def _get_secret(scope, key):
 def _sf_client():
     from simple_salesforce import Salesforce
 
-    # Try username+password+security_token first (auto-refreshes, ideal for scheduled jobs).
-    # Only fall back to session_id if the username secret is not set at all.
-    try:
-        username = _get_secret(SECRET_SCOPE, "sf_username")
-    except Exception:
-        username = None
+    # Databricks Salesforce enforces SSO — username/password auth is blocked.
+    # Authenticate with the stored OAuth session_id (sf_access_token).
+    # If the token has expired, run refresh_sf_token.py locally to update it.
+    session_id   = _get_secret(SECRET_SCOPE, "sf_access_token")
+    instance_url = _get_secret(SECRET_SCOPE, "sf_instance_url")
 
-    if username:
-        # Credentials are configured — use them and let any auth error surface clearly.
-        password      = _get_secret(SECRET_SCOPE, "sf_password")
-        sec_token     = _get_secret(SECRET_SCOPE, "sf_security_token")
-        instance_url  = _get_secret(SECRET_SCOPE, "sf_instance_url")
-        # databricks.my.salesforce.com is a custom domain; extract "databricks.my" as the domain.
-        domain = None
-        if instance_url:
-            host = instance_url.replace("https://", "").replace("http://", "").rstrip("/")
-            if host.endswith(".salesforce.com"):
-                domain = host[: -len(".salesforce.com")]
-        return Salesforce(
-            username       = username,
-            password       = password,
-            security_token = sec_token or "",
-            domain         = domain or "login",
+    if not session_id:
+        raise RuntimeError(
+            "sf_access_token secret is empty. "
+            "Run refresh_sf_token.py to get a fresh token and update the secret."
         )
 
-    # Legacy fallback: session_id expires — only used until new creds are stored.
-    return Salesforce(
-        session_id   = _get_secret(SECRET_SCOPE, "sf_access_token"),
-        instance_url = _get_secret(SECRET_SCOPE, "sf_instance_url"),
-    )
+    return Salesforce(session_id=session_id, instance_url=instance_url)
 
 
 def _to_dt(val):
