@@ -97,12 +97,16 @@ databricks pipelines start-update 28b9d78f-1fc8-444b-89df-556670175352 --full-re
 ```
 
 ### Secrets required (scope: `satsen-sa-tracker`)
-| Key                       | Description                         |
-|---------------------------|-------------------------------------|
-| `google_oauth_credentials`| Google OAuth JSON (auto-refreshes)  |
-| `sf_access_token`         | Salesforce session token            |
-| `sf_instance_url`         | Salesforce instance URL             |
-| `slack_token`             | Slack Bot OAuth token (optional)    |
+| Key                       | Description                                      |
+|---------------------------|--------------------------------------------------|
+| `google_oauth_credentials`| Google OAuth JSON (auto-refreshes)              |
+| `sf_instance_url`         | Salesforce instance URL (e.g. https://databricks.my.salesforce.com) |
+| `sf_refresh_token`        | OAuth refresh token (obtained via refresh_sf_token.py) |
+| `sf_client_id`            | Connected App Consumer Key                       |
+| `sf_client_secret`        | Connected App Consumer Secret                    |
+| `slack_token`             | Slack Bot OAuth token (optional)                 |
+
+**Salesforce (refresh token method):** The pipeline auto-refreshes access tokens using the refresh token. Run `python3 refresh_sf_token.py` once with a Connected App configured — see that script for setup steps. Fallback: `sf_access_token` (session) works but expires in ~2 hours.
 
 ---
 
