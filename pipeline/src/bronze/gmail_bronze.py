@@ -4,9 +4,13 @@
 # COMMAND ----------
 
 """
-Bronze Layer — Gmail
-Reads Google OAuth credentials from Databricks Secrets, fetches customer-tagged
-emails via Gmail API, and materializes them as a pipeline-managed Delta table.
+Bronze Layer — Gmail (Incremental Append)
+Fetches only the PREVIOUS DAY's customer-tagged emails via Gmail API and
+appends them to a persistent streaming table. Re-runs are safe — the silver
+layer deduplicates by message_id using ROW_NUMBER().
+
+Lookback: newer_than:2d (yesterday + 1-day safety buffer for late-arriving mail)
+Volume:   up to 50 emails per customer label per run (9 labels = max 450/day)
 """
 
 import base64 as b64lib
@@ -50,6 +54,26 @@ NO_REPLY_SUBJECTS = [
     "invitation:", "updated invitation:", "canceled event",
     "icymi", "all hands", "outage", "survey", "shared with you",
 ]
+
+_SCHEMA = StructType([
+    StructField("message_id",     StringType()),
+    StructField("thread_id",      StringType()),
+    StructField("account_name",   StringType()),
+    StructField("customer_label", StringType()),
+    StructField("from_email",     StringType()),
+    StructField("from_name",      StringType()),
+    StructField("to_emails",      ArrayType(StringType())),
+    StructField("cc_emails",      ArrayType(StringType())),
+    StructField("subject",        StringType()),
+    StructField("body_snippet",   StringType()),
+    StructField("body_text",      StringType()),
+    StructField("received_date",  TimestampType()),
+    StructField("labels",         ArrayType(StringType())),
+    StructField("is_unread",      BooleanType()),
+    StructField("needs_response", BooleanType()),
+    StructField("has_attachment", BooleanType()),
+    StructField("_extracted_at",  TimestampType()),
+])
 
 
 def _get_secret(scope, key):
@@ -115,12 +139,8 @@ def _needs_response(hmap):
     return True
 
 
-# ── Bronze: raw Gmail customer emails ───────────────────────────────────────
-@dlt.table(
-    name    = "raw_gmail_emails",
-    comment = "Raw Gmail emails with Customers/* labels",
-)
-def raw_gmail_emails():
+def _fetch_emails():
+    """Fetch yesterday's emails (newer_than:2d for safety buffer) across all customer labels."""
     token = _google_token()
     now   = datetime.now(timezone.utc)
     rows  = []
@@ -128,7 +148,11 @@ def raw_gmail_emails():
 
     for label_id, account_name in CUSTOMER_LABELS.items():
         try:
-            resp    = _gmail(token, "messages", {"labelIds": label_id, "q": "newer_than:30d", "maxResults": 25})
+            resp    = _gmail(token, "messages", {
+                "labelIds":  label_id,
+                "q":         "newer_than:2d",   # yesterday + 1-day safety buffer
+                "maxResults": 50,               # max 50 per label per run
+            })
             msg_ids = [m["id"] for m in resp.get("messages", [])]
         except Exception:
             continue
@@ -178,24 +202,17 @@ def raw_gmail_emails():
                 now,
             ))
 
-    schema = StructType([
-        StructField("message_id",     StringType()),
-        StructField("thread_id",      StringType()),
-        StructField("account_name",   StringType()),
-        StructField("customer_label", StringType()),
-        StructField("from_email",     StringType()),
-        StructField("from_name",      StringType()),
-        StructField("to_emails",      ArrayType(StringType())),
-        StructField("cc_emails",      ArrayType(StringType())),
-        StructField("subject",        StringType()),
-        StructField("body_snippet",   StringType()),
-        StructField("body_text",      StringType()),
-        StructField("received_date",  TimestampType()),
-        StructField("labels",         ArrayType(StringType())),
-        StructField("is_unread",      BooleanType()),
-        StructField("needs_response", BooleanType()),
-        StructField("has_attachment", BooleanType()),
-        StructField("_extracted_at",  TimestampType()),
-    ])
+    return spark.createDataFrame(rows, _SCHEMA)
 
-    return spark.createDataFrame(rows, schema)
+
+# ── Persistent streaming table (accumulates history over time) ───────────────
+dlt.create_streaming_live_table(
+    name    = "raw_gmail_emails",
+    comment = "Raw Gmail customer emails — incremental daily append, deduplicated in silver",
+    schema  = _SCHEMA,
+)
+
+# ── Daily append flow: fetches only the previous day's emails ────────────────
+@dlt.append_flow(target="raw_gmail_emails")
+def gmail_incremental():
+    return _fetch_emails()
