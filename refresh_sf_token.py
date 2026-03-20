@@ -2,20 +2,23 @@
 """
 Store Salesforce credentials in Databricks Secrets for the pipeline.
 
-Two modes:
+Three modes:
 
-  1. MANUAL (no setup): Run without SF_CLIENT_ID/SF_CLIENT_SECRET.
-     Prompts for the 'sid' cookie from your browser. Token expires in ~2 hours.
+  1. SECURITY TOKEN (recommended if no SID): Username + password + security token.
+     Pipeline logs in fresh on every run. Works if your org allows API login (not SSO-only).
+     python3 refresh_sf_token.py --security-token
+     python3 refresh_sf_token.py USERNAME PASSWORD SECURITY_TOKEN
 
-  2. OAUTH (auto-refresh): Set SF_CLIENT_ID and SF_CLIENT_SECRET (Connected App).
-     Opens browser, captures refresh token. Pipeline auto-refreshes on every run.
+  2. MANUAL SID: Pass the 'sid' cookie from browser. Token expires in ~2 hours.
+     python3 refresh_sf_token.py YOUR_SID_HERE
 
-Usage:
-    python3 refresh_sf_token.py
+  3. OAUTH: Set SF_CLIENT_ID/SF_CLIENT_SECRET (Connected App). Auto-refresh.
 """
 
 import http.server
 import json
+import os
+import sys
 import subprocess
 import threading
 import urllib.parse
@@ -112,8 +115,39 @@ def _store_secret(key, value):
     return True
 
 
+def _security_token_flow():
+    """Get username, password, security_token from args or env. No browser needed."""
+    if len(sys.argv) >= 4 and sys.argv[1] != "--security-token":
+        return sys.argv[1].strip(), sys.argv[2].strip(), sys.argv[3].strip()
+    username = os.environ.get("SF_USERNAME", "").strip()
+    password = os.environ.get("SF_PASSWORD", "").strip()
+    sec_token = os.environ.get("SF_SECURITY_TOKEN", "").strip()
+    if username and password:
+        return username, password, sec_token
+    print("""
+=================================================================
+SECURITY TOKEN (username + password + security token)
+=================================================================
+
+Get your security token: Salesforce → Setup → My Personal Information → Reset My Security Token
+
+Pass as args:  python3 refresh_sf_token.py USERNAME PASSWORD SECURITY_TOKEN
+Or env vars:   SF_USERNAME=... SF_PASSWORD=... SF_SECURITY_TOKEN=... python3 refresh_sf_token.py --security-token
+
+Note: If your org uses SSO-only, this may fail with INVALID_SSO_GATEWAY_URL.
+=================================================================
+""")
+    u = input("Salesforce username (email): ").strip()
+    p = input("Salesforce password: ").strip()
+    t = input("Security token (from Reset My Security Token): ").strip()
+    return u, p, t
+
+
 def _manual_sid_flow():
-    """Prompt for sid cookie and store in Databricks secrets."""
+    """Get sid from arg, env, or prompt. Works in read-only terminals when passed as arg."""
+    sid = (sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "--security-token" else os.environ.get("SF_SID", "")).strip()
+    if sid:
+        return sid
     print("""
 =================================================================
 MANUAL SESSION (sid cookie)
@@ -124,10 +158,11 @@ MANUAL SESSION (sid cookie)
 3. Open Developer Tools (F12) → Application → Cookies → databricks.my.salesforce.com
 4. Find the cookie named "sid" and copy its value (looks like: 00D...!AQ...)
 
+Pass it as:  python3 refresh_sf_token.py YOUR_SID_HERE
+
 =================================================================
 """)
-    sid = input("Paste the 'sid' cookie value here: ").strip()
-    return sid
+    return input("Paste the 'sid' cookie value here: ").strip()
 
 
 def main():
@@ -136,7 +171,30 @@ def main():
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    if SF_CLIENT_ID and SF_CLIENT_SECRET:
+    use_security_token = "--security-token" in sys.argv or (
+        len(sys.argv) >= 4 and sys.argv[1] != "--security-token"
+    )
+
+    if use_security_token:
+        # Security token flow: username + password + security token
+        print("\nUsing Security Token (username + password + security token)...")
+        username, password, sec_token = _security_token_flow()
+        if not username or not password:
+            print("\nERROR: Username and password are required.")
+            return
+        print("\nStoring in Databricks Secrets...")
+        ok = _store_secret("sf_username", username)
+        ok &= _store_secret("sf_password", password)
+        ok &= _store_secret("sf_security_token", sec_token or "")
+        ok &= _store_secret("sf_instance_url", SF_INSTANCE_URL)
+        if ok:
+            print(f"  ✓ sf_username, sf_password, sf_security_token, sf_instance_url updated in scope '{DATABRICKS_SCOPE}'")
+            print("\n  The pipeline will log in fresh on every run. No expiration.")
+            print("\nDone! Re-run the pipeline to verify.")
+        else:
+            print("\nFailed to store. Check errors above.")
+
+    elif SF_CLIENT_ID and SF_CLIENT_SECRET:
         # OAuth flow (Connected App)
         print("\nUsing OAuth 2.0 (Connected App)...")
         tokens = _oauth_flow()
@@ -167,8 +225,7 @@ def main():
             print("\nSome secrets failed to store. Check errors above.")
     else:
         # Manual sid flow (no Connected App)
-        print("\nNo Connected App configured. Using manual method (sid cookie).")
-        print("  Token expires in ~2 hours — run this script again when the pipeline fails.\n")
+        print("\nUsing manual method (sid cookie). Token expires in ~2 hours.\n")
         sid = _manual_sid_flow()
 
         if not sid:

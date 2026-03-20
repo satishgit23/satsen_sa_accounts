@@ -116,7 +116,25 @@ def _sf_client(access_token=None, instance_url=None):
     if access_token and instance_url:
         return Salesforce(session_id=access_token, instance_url=instance_url)
 
-    # 1. Try refresh token first — get a fresh access token every time.
+    # 1. Try username + password + security_token — fresh login every run, no expiration.
+    if _secret_exists(SECRET_SCOPE, "sf_username") and _secret_exists(SECRET_SCOPE, "sf_password"):
+        try:
+            username  = _get_secret(SECRET_SCOPE, "sf_username")
+            password  = _get_secret(SECRET_SCOPE, "sf_password")
+            sec_token = _get_secret_optional(SECRET_SCOPE, "sf_security_token") or ""
+            inst_url  = _get_secret_optional(SECRET_SCOPE, "sf_instance_url") or "https://databricks.my.salesforce.com"
+            host     = inst_url.replace("https://", "").replace("http://", "").rstrip("/")
+            domain   = host[: -len(".salesforce.com")] if host.endswith(".salesforce.com") else "login"
+            return Salesforce(
+                username=username,
+                password=password,
+                security_token=sec_token,
+                domain=domain,
+            )
+        except Exception:
+            pass
+
+    # 2. Try refresh token — get a fresh access token every time.
     try:
         tokens = _refresh_access_token()
         if tokens:
@@ -126,15 +144,16 @@ def _sf_client(access_token=None, instance_url=None):
     except Exception:
         pass
 
-    # 2. Fallback: use stored session_id (expires ~2h; run refresh_sf_token.py to get refresh token).
+    # 3. Fallback: use stored session_id (expires ~2h).
     session_id   = _get_secret(SECRET_SCOPE, "sf_access_token")
     instance_url = _get_secret(SECRET_SCOPE, "sf_instance_url")
 
     if not session_id:
         raise RuntimeError(
-            "No valid Salesforce auth. Either:\n"
-            "  A) Run refresh_sf_token.py with a Connected App to store sf_refresh_token, sf_client_id, sf_client_secret\n"
-            "  B) Or store sf_access_token (session) manually — it expires in ~2 hours."
+            "No valid Salesforce auth. Run refresh_sf_token.py with one of:\n"
+            "  A) --security-token + username/password/security_token (recommended)\n"
+            "  B) Connected App (sf_refresh_token, sf_client_id, sf_client_secret)\n"
+            "  C) SID cookie (sf_access_token) — expires in ~2 hours"
         )
 
     return Salesforce(session_id=session_id, instance_url=instance_url)
