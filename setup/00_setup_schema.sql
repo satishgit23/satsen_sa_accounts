@@ -25,7 +25,30 @@ COMMENT 'SA Activity Tracker — Salesforce, Gmail, Google Calendar, and Slack d
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 2 · Salesforce — Accounts
+-- MAGIC ## 2 · Salesforce — Staging (populated by fetch_salesforce_to_databricks.py)
+
+-- COMMAND ----------
+
+CREATE TABLE IF NOT EXISTS satsen_catalog.satsen_sa_accounts.sf_accounts_staging (
+  account_id STRING, account_name STRING, type STRING, industry STRING, vertical STRING,
+  arr DOUBLE, t3m_arr DOUBLE, number_of_employees INT, billing_city STRING, billing_state STRING,
+  billing_country STRING, owner_name STRING, last_sa_engaged_id STRING, last_sa_engaged_name STRING,
+  _extracted_at TIMESTAMP
+) USING DELTA
+COMMENT 'Staging for SF accounts — populated by local fetch_salesforce_to_databricks.py';
+
+CREATE TABLE IF NOT EXISTS satsen_catalog.satsen_sa_accounts.sf_use_cases_staging (
+  uco_id STRING, account_id STRING, account_name STRING, uco_name STRING, stage STRING,
+  description STRING, use_case_type STRING, implementation_status STRING,
+  go_live_date TIMESTAMP, estimated_project_go_live TIMESTAMP, last_modified_date TIMESTAMP,
+  created_date TIMESTAMP, assigned_sa_id STRING, assigned_sa_name STRING, _extracted_at TIMESTAMP
+) USING DELTA
+COMMENT 'Staging for SF use cases — populated by local fetch_salesforce_to_databricks.py';
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3 · Salesforce — Accounts (legacy)
 
 -- COMMAND ----------
 
@@ -57,7 +80,7 @@ TBLPROPERTIES (
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 3 · Salesforce — Use Cases (UCOs)
+-- MAGIC ## 4 · Salesforce — Use Cases (UCOs)
 
 -- COMMAND ----------
 
@@ -89,7 +112,7 @@ TBLPROPERTIES (
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 4 · Gmail — Customer Emails
+-- MAGIC ## 5 · Gmail — Customer Emails
 
 -- COMMAND ----------
 
@@ -123,7 +146,7 @@ TBLPROPERTIES (
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 5 · Google Calendar — Meeting Events
+-- MAGIC ## 6 · Google Calendar — Meeting Events
 
 -- COMMAND ----------
 
@@ -161,7 +184,7 @@ TBLPROPERTIES (
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 6 · Slack — Messages
+-- MAGIC ## 7 · Slack — Messages
 
 -- COMMAND ----------
 
@@ -192,7 +215,7 @@ TBLPROPERTIES (
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 7 · Ingestion Run Log
+-- MAGIC ## 8 · Ingestion Run Log
 
 -- COMMAND ----------
 
@@ -212,7 +235,7 @@ TBLPROPERTIES ('delta.autoOptimize.optimizeWrite' = 'true');
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 8 · Unified Activity View
+-- MAGIC ## 9 · Unified Activity View
 
 -- COMMAND ----------
 
@@ -268,7 +291,7 @@ ORDER BY activity_date DESC;
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 9 · Verify Setup
+-- MAGIC ## 10 · Verify Setup
 
 -- COMMAND ----------
 
