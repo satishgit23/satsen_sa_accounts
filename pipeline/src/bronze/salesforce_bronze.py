@@ -11,9 +11,6 @@ and materializes raw accounts and use cases as pipeline-managed Delta tables.
 """
 
 import base64
-import json
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 
 import dlt
@@ -61,129 +58,24 @@ def _get_secret(scope, key):
         return raw
 
 
-def _secret_exists(scope, key):
-    """Return True if the secret exists in the scope."""
-    try:
-        w = WorkspaceClient()
-        for s in w.secrets.list_secrets(scope=scope):
-            if s.key == key:
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def _get_secret_optional(scope, key):
-    """Return secret value or None if the secret does not exist."""
-    if not _secret_exists(scope, key):
-        return None
-    try:
-        return _get_secret(scope, key)
-    except Exception:
-        return None
-
-
-def _refresh_access_token():
-    """Exchange refresh_token for a new access_token via OAuth 2.0."""
-    if not _secret_exists(SECRET_SCOPE, "sf_refresh_token"):
-        return None
-    refresh_token = _get_secret(SECRET_SCOPE, "sf_refresh_token")
-    client_id     = _get_secret_optional(SECRET_SCOPE, "sf_client_id")
-    client_secret = _get_secret_optional(SECRET_SCOPE, "sf_client_secret")
-    instance_url  = _get_secret_optional(SECRET_SCOPE, "sf_instance_url") or "https://databricks.my.salesforce.com"
-
-    if not all([refresh_token, client_id, client_secret]):
-        return None
-
-    token_url = f"{instance_url.rstrip('/')}/services/oauth2/token"
-    data = urllib.parse.urlencode({
-        "grant_type":    "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id":     client_id,
-        "client_secret": client_secret,
-    }).encode()
-
-    req = urllib.request.Request(token_url, data=data, method="POST")
-    req.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read().decode())
-    return result.get("access_token"), result.get("instance_url", instance_url)
-
-
-def _sf_client(access_token=None, instance_url=None):
+def _sf_client():
     from simple_salesforce import Salesforce
 
-    if access_token and instance_url:
-        return Salesforce(session_id=access_token, instance_url=instance_url)
-
-    # 1. Try username + password + security_token — fresh login every run, no expiration.
-    if _secret_exists(SECRET_SCOPE, "sf_username") and _secret_exists(SECRET_SCOPE, "sf_password"):
-        try:
-            username  = _get_secret(SECRET_SCOPE, "sf_username")
-            password  = _get_secret(SECRET_SCOPE, "sf_password")
-            sec_token = _get_secret_optional(SECRET_SCOPE, "sf_security_token") or ""
-            inst_url  = _get_secret_optional(SECRET_SCOPE, "sf_instance_url") or "https://databricks.my.salesforce.com"
-            host     = inst_url.replace("https://", "").replace("http://", "").rstrip("/")
-            domain   = host[: -len(".salesforce.com")] if host.endswith(".salesforce.com") else "login"
-            return Salesforce(
-                username=username,
-                password=password,
-                security_token=sec_token,
-                domain=domain,
-            )
-        except Exception:
-            pass
-
-    # 2. Try refresh token — get a fresh access token every time.
-    try:
-        tokens = _refresh_access_token()
-        if tokens:
-            access_token, instance_url = tokens
-            if access_token:
-                return Salesforce(session_id=access_token, instance_url=instance_url)
-    except Exception:
-        pass
-
-    # 3. Fallback: use stored session_id (expires ~2h).
     session_id   = _get_secret(SECRET_SCOPE, "sf_access_token")
     instance_url = _get_secret(SECRET_SCOPE, "sf_instance_url")
 
     if not session_id:
         raise RuntimeError(
-            "No valid Salesforce auth. Run refresh_sf_token.py with one of:\n"
-            "  A) --security-token + username/password/security_token (recommended)\n"
-            "  B) Connected App (sf_refresh_token, sf_client_id, sf_client_secret)\n"
-            "  C) SID cookie (sf_access_token) — expires in ~2 hours"
+            "sf_access_token secret is empty. Run refresh_sf_token.py to store the SID cookie value."
         )
 
     return Salesforce(session_id=session_id, instance_url=instance_url)
 
 
 def _sf_query_all(query):
-    """Run a Salesforce query with automatic retry on session expiry."""
-    from simple_salesforce.exceptions import SalesforceExpiredSession
-
-    def _is_session_expired(ex):
-        if isinstance(ex, SalesforceExpiredSession):
-            return True
-        return "INVALID_SESSION_ID" in str(getattr(ex, "content", [])) or "Session expired" in str(ex)
-
+    """Run a Salesforce query."""
     sf = _sf_client()
-    try:
-        return sf.query_all(query).get("records", [])
-    except Exception as ex:
-        if not _is_session_expired(ex):
-            raise
-        # Session expired — refresh token and retry with a new session.
-        tokens = _refresh_access_token()
-        if not tokens:
-            raise RuntimeError(
-                "Session expired and no refresh token configured. "
-                "Run refresh_sf_token.py to store sf_refresh_token, sf_client_id, sf_client_secret."
-            )
-        access_token, instance_url = tokens
-        sf = _sf_client(access_token=access_token, instance_url=instance_url)
-        return sf.query_all(query).get("records", [])
+    return sf.query_all(query).get("records", [])
 
 
 def _to_dt(val):
