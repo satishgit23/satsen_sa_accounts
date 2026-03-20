@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """
-Obtain Salesforce OAuth tokens (access + refresh) and store them in Databricks Secrets.
+Store Salesforce credentials in Databricks Secrets for the pipeline.
 
-Run this ONCE with a Connected App configured. The refresh token allows the pipeline
-to automatically get new access tokens on every run — no more manual refreshes.
+Two modes:
 
-Prerequisites:
-  1. Create a Connected App in Salesforce (Setup → App Manager → New Connected App)
-  2. Enable OAuth Settings
-  3. Add Callback URL: http://localhost:8765/callback
-  4. Under "Selected OAuth Scopes", add: Access and manage your data (api),
-     Perform requests at any time (refresh_token, offline_access)
-  5. Copy the Consumer Key and Consumer Secret into SF_CLIENT_ID and SF_CLIENT_SECRET below
+  1. MANUAL (no setup): Run without SF_CLIENT_ID/SF_CLIENT_SECRET.
+     Prompts for the 'sid' cookie from your browser. Token expires in ~2 hours.
+
+  2. OAUTH (auto-refresh): Set SF_CLIENT_ID and SF_CLIENT_SECRET (Connected App).
+     Opens browser, captures refresh token. Pipeline auto-refreshes on every run.
 
 Usage:
     python3 refresh_sf_token.py
@@ -115,54 +112,78 @@ def _store_secret(key, value):
     return True
 
 
+def _manual_sid_flow():
+    """Prompt for sid cookie and store in Databricks secrets."""
+    print("""
+=================================================================
+MANUAL SESSION (sid cookie)
+=================================================================
+
+1. Open a browser and go to: https://databricks.my.salesforce.com
+2. Log in with your Databricks SSO.
+3. Open Developer Tools (F12) → Application → Cookies → databricks.my.salesforce.com
+4. Find the cookie named "sid" and copy its value (looks like: 00D...!AQ...)
+
+=================================================================
+""")
+    sid = input("Paste the 'sid' cookie value here: ").strip()
+    return sid
+
+
 def main():
     print("=" * 60)
-    print("  Salesforce OAuth — Refresh Token Setup")
+    print("  Salesforce Token Setup")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    if not SF_CLIENT_ID or not SF_CLIENT_SECRET:
-        print("""
-ERROR: SF_CLIENT_ID and SF_CLIENT_SECRET must be set.
+    if SF_CLIENT_ID and SF_CLIENT_SECRET:
+        # OAuth flow (Connected App)
+        print("\nUsing OAuth 2.0 (Connected App)...")
+        tokens = _oauth_flow()
 
-1. In Salesforce: Setup → App Manager → New Connected App (or edit existing)
-2. Enable "OAuth Settings"
-3. Callback URL: http://localhost:8765/callback
-4. OAuth Scopes: api, refresh_token, offline_access
-5. Copy Consumer Key → SF_CLIENT_ID
-6. Copy Consumer Secret → SF_CLIENT_SECRET
-7. Edit this script and paste the values at the top
-8. Run again: python3 refresh_sf_token.py
-""")
-        return
+        if not tokens.get("access_token"):
+            print("\nERROR: No access token captured. Please try again.")
+            return
 
-    tokens = _oauth_flow()
+        if not tokens.get("refresh_token"):
+            print("\nWARNING: No refresh token in response. Ensure your Connected App")
+            print("  has 'refresh_token' and 'offline_access' in OAuth Scopes.")
 
-    if not tokens.get("access_token"):
-        print("\nERROR: No access token captured. Please try again.")
-        return
-
-    if not tokens.get("refresh_token"):
-        print("\nWARNING: No refresh token in response. Ensure your Connected App")
-        print("  has 'refresh_token' and 'offline_access' in OAuth Scopes.")
-
-    print("\nStoring tokens in Databricks Secrets...")
-
-    ok = True
-    ok &= _store_secret("sf_access_token",  tokens.get("access_token", ""))
-    ok &= _store_secret("sf_instance_url",  tokens.get("instance_url", SF_INSTANCE_URL))
-    if tokens.get("refresh_token"):
-        ok &= _store_secret("sf_refresh_token", tokens["refresh_token"])
-        ok &= _store_secret("sf_client_id",     SF_CLIENT_ID)
-        ok &= _store_secret("sf_client_secret", SF_CLIENT_SECRET)
-
-    if ok:
-        print(f"  ✓ Secrets updated in scope '{DATABRICKS_SCOPE}'")
+        print("\nStoring tokens in Databricks Secrets...")
+        ok = True
+        ok &= _store_secret("sf_access_token",  tokens.get("access_token", ""))
+        ok &= _store_secret("sf_instance_url",  tokens.get("instance_url", SF_INSTANCE_URL))
         if tokens.get("refresh_token"):
-            print("\n  The pipeline will now auto-refresh access tokens on every run.")
-        print("\nDone! Re-run the pipeline to verify.")
+            ok &= _store_secret("sf_refresh_token", tokens["refresh_token"])
+            ok &= _store_secret("sf_client_id",     SF_CLIENT_ID)
+            ok &= _store_secret("sf_client_secret", SF_CLIENT_SECRET)
+
+        if ok:
+            print(f"  ✓ Secrets updated in scope '{DATABRICKS_SCOPE}'")
+            if tokens.get("refresh_token"):
+                print("\n  The pipeline will now auto-refresh access tokens on every run.")
+            print("\nDone! Re-run the pipeline to verify.")
+        else:
+            print("\nSome secrets failed to store. Check errors above.")
     else:
-        print("\nSome secrets failed to store. Check errors above.")
+        # Manual sid flow (no Connected App)
+        print("\nNo Connected App configured. Using manual method (sid cookie).")
+        print("  Token expires in ~2 hours — run this script again when the pipeline fails.\n")
+        sid = _manual_sid_flow()
+
+        if not sid:
+            print("\nERROR: No value entered.")
+            return
+
+        print("\nStoring in Databricks Secrets...")
+        ok = _store_secret("sf_access_token", sid)
+        ok &= _store_secret("sf_instance_url", SF_INSTANCE_URL)
+
+        if ok:
+            print(f"  ✓ sf_access_token and sf_instance_url updated in scope '{DATABRICKS_SCOPE}'")
+            print("\nDone! Re-run the pipeline. The token will expire in ~2 hours.")
+        else:
+            print("\nFailed to store. Check errors above.")
 
 
 if __name__ == "__main__":
