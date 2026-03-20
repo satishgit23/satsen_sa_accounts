@@ -61,12 +61,36 @@ def _get_secret(scope, key):
         return raw
 
 
+def _secret_exists(scope, key):
+    """Return True if the secret exists in the scope."""
+    try:
+        w = WorkspaceClient()
+        for s in w.secrets.list_secrets(scope=scope):
+            if s.key == key:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _get_secret_optional(scope, key):
+    """Return secret value or None if the secret does not exist."""
+    if not _secret_exists(scope, key):
+        return None
+    try:
+        return _get_secret(scope, key)
+    except Exception:
+        return None
+
+
 def _refresh_access_token():
     """Exchange refresh_token for a new access_token via OAuth 2.0."""
+    if not _secret_exists(SECRET_SCOPE, "sf_refresh_token"):
+        return None
     refresh_token = _get_secret(SECRET_SCOPE, "sf_refresh_token")
-    client_id     = _get_secret(SECRET_SCOPE, "sf_client_id")
-    client_secret = _get_secret(SECRET_SCOPE, "sf_client_secret")
-    instance_url  = _get_secret(SECRET_SCOPE, "sf_instance_url") or "https://databricks.my.salesforce.com"
+    client_id     = _get_secret_optional(SECRET_SCOPE, "sf_client_id")
+    client_secret = _get_secret_optional(SECRET_SCOPE, "sf_client_secret")
+    instance_url  = _get_secret_optional(SECRET_SCOPE, "sf_instance_url") or "https://databricks.my.salesforce.com"
 
     if not all([refresh_token, client_id, client_secret]):
         return None
